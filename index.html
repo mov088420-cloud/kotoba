@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ja" data-theme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f6f7fa">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ことば">
+  <meta name="description" content="よく使う定型文を、この端末に。オフラインで使える定型文コピー管理アプリ。">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'self'; manifest-src 'self'">
+  <title>ことば — 定型文</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="./icons/icon.svg">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <link rel="apple-touch-startup-image" href="./icons/startup-1170x2532.png" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="./icons/startup-1179x2556.png" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+  <link rel="apple-touch-startup-image" href="./icons/startup-750x1334.png" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="app-header">
+      <a class="brand" href="./" aria-label="ことば ホーム"><img src="./icons/icon.svg" alt="" width="32" height="32"><span>ことば</span></a>
+      <button class="icon-button" id="settings-open" aria-label="設定を開く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6m8 4v6"/></svg></button>
+    </header>
+    <main>
+      <div class="title-row"><h1>定型文</h1><span id="total-count" class="count">0件</span></div>
+      <div class="readiness" id="offline-status" role="status"><span class="status-dot"></span><span id="offline-label">オフラインの準備を確認中…</span></div>
+      <div id="main-error" class="error-banner" role="alert" hidden></div>
+      <div id="update-notice" class="notice" hidden>更新版の準備ができました。保存を終え、ことばを開いているすべての画面を閉じてから起動し直してください。</div>
+      <div class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg><input id="search" type="search" placeholder="タイトル・本文を検索" aria-label="タイトル・本文を検索" autocomplete="off"></div>
+      <div class="filter-row">
+        <div class="segmented" role="group" aria-label="表示対象"><button id="filter-all" aria-pressed="true">すべて</button><button id="filter-favorites" aria-pressed="false">お気に入り</button></div>
+        <button id="categories-open" class="text-button">カテゴリ管理</button>
+      </div>
+      <div class="list-tools"><label class="select-wrap"><span class="sr-only">カテゴリで絞り込み</span><select id="category-filter"><option value="">すべてのカテゴリ</option></select></label><label class="sort-wrap"><span class="sr-only">並び順</span><select id="sort"><option value="updated">更新が新しい順</option><option value="title">タイトル順</option></select></label></div>
+      <p id="result-count" class="result-count" aria-live="polite"></p>
+      <div id="cards" class="cards" aria-label="定型文一覧"></div>
+      <div id="empty-state" class="empty-state" hidden><div class="empty-mark" aria-hidden="true">“</div><h2 id="empty-title">いつもの言葉を、すぐに。</h2><p id="empty-description">よく使う文章を登録して、<br>ワンタップでコピーできます。</p><button id="empty-add" class="text-button">最初の定型文を登録</button></div>
+      <p class="local-note"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="10" width="12" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>この端末内に保存・同期なし</p>
+    </main>
+    <footer class="bottom-bar"><button id="new-template" class="primary"><span aria-hidden="true">＋</span> 新規登録</button></footer>
+  </div>
+  <dialog id="editor-dialog" class="sheet" aria-labelledby="editor-heading">
+    <form id="editor-form"><header class="sheet-header"><button type="button" class="text-button" id="editor-cancel">キャンセル</button><h2 id="editor-heading">新規登録</h2><button type="submit" class="text-button strong" id="save-template">保存</button></header>
+      <div class="sheet-content"><p class="error-banner" id="editor-error" role="alert" hidden></p><label class="field">タイトル<input id="edit-title" required maxlength="200" placeholder="例：日程調整のお願い" autocomplete="off"></label><label class="field">本文<textarea id="edit-body" required rows="10" placeholder="コピーしたい文章を入力" spellcheck="false"></textarea></label><p class="field-hint">改行や空白を含めて、そのまま保存します。</p><label class="field">カテゴリ<select id="edit-category"></select></label><label class="switch-row">お気に入り<input type="checkbox" id="edit-favorite" role="switch"></label><details id="clibor-original" class="notice" hidden><summary>Cliborの元メモ</summary><p id="clibor-note" class="original-note"></p><p class="field-hint">元のホットキー：<span id="clibor-hotkey"></span>（iPhoneでは動作しません）</p></details><button type="button" id="delete-template" class="danger-button full" hidden>この定型文を削除</button></div>
+    </form>
+  </dialog>
+  <dialog id="categories-dialog" class="sheet" aria-labelledby="categories-heading"><header class="sheet-header"><h2 id="categories-heading">カテゴリ管理</h2><button class="text-button" data-close="categories-dialog">完了</button></header><div class="sheet-content"><p class="muted">使いやすい名前で、文章を整理できます。</p><p id="category-error" class="error-banner" role="alert" hidden></p><form id="category-form" class="inline-form"><label class="sr-only" for="category-name">新しいカテゴリ名</label><input id="category-name" required maxlength="80" placeholder="新しいカテゴリ" autocomplete="off"><button class="primary" type="submit">追加</button></form><div id="category-list" class="settings-group"></div><p class="field-hint">カテゴリを削除しても定型文は残り、「未分類」になります。</p></div></dialog>
+  <dialog id="settings-dialog" class="sheet" aria-labelledby="settings-heading"><header class="sheet-header"><h2 id="settings-heading">設定</h2><button class="text-button" data-close="settings-dialog">完了</button></header><div class="sheet-content"><p id="settings-error" class="error-banner" role="alert" hidden></p><h3>表示</h3><label class="setting-row">外観<select id="theme"><option value="system">端末に合わせる</option><option value="light">ライト</option><option value="dark">ダーク</option></select></label><h3>オフラインと保存</h3><div class="settings-group"><p id="settings-offline">準備を確認中…</p><p id="storage-status" class="muted">保存領域を確認中…</p><button id="request-persist" class="text-button">データを保持するよう端末に要求</button><button id="check-update" class="text-button">アプリの更新・準備を確認</button></div><h3>手動バックアップ</h3><div class="settings-group"><button id="export-data" class="setting-action">JSONファイルを書き出す<span aria-hidden="true">↗</span></button><label class="setting-action file-label">JSONファイルから復元する<span aria-hidden="true">＋</span><input id="import-file" type="file" accept=".json,application/json"></label></div><p class="field-hint">自動バックアップは行いません。ファイルには本文が含まれます。会社の規程に従い、許可された保存先だけを選んでください。</p><h3>Cliborから移行</h3><div class="settings-group"><label class="setting-action file-label">CliborのCSVを取り込む<span aria-hidden="true">＋</span><input id="clibor-file" type="file" accept=".csv,text/csv,text/plain"></label></div><p class="field-hint">定型文だけを取り込みます。本文をサーバーに送信しません。ホーム画面のアイコンから開いた状態で、初回に一度取り込んでください。ファイルには文章が含まれるため、保管と転送先に注意してください。</p><h3>はじめて使うとき</h3><p>Safariの共有メニューから「ホーム画面に追加」を選びます。追加したアイコンから起動し、「オフライン利用の準備完了」を確認してから登録してください。</p><h3>データについて</h3><div class="notice"><p>定型文はこの端末の、このアプリの保存領域にだけ保存します。本文や操作履歴をサーバーに送信する機能はありません。</p><p>端末の初期化、Webサイトデータの削除、iOSによる領域の解放などでデータが消える可能性があります。永続保存の要求が許可されても、永久保存は保証されません。</p><p>初回導入・アプリ更新にはインターネット接続が必要です。会社の端末管理設定により、導入・コピー・ファイル書き出しが制限される場合があります。管理者へご相談ください。</p></div><p class="version">ことば 1.1.1 · この端末のための定型文帳</p></div></dialog>
+  <dialog id="import-dialog" class="sheet compact" aria-labelledby="import-heading"><header class="sheet-header"><h2 id="import-heading">バックアップを復元</h2><button class="text-button" id="import-cancel">キャンセル</button></header><div class="sheet-content"><p id="import-summary"></p><p class="error-banner" id="import-error" role="alert" hidden></p><label class="radio-row"><input type="radio" name="import-mode" value="merge" checked><span><strong>既存データと統合</strong><small>同じ内容は重複を避け、変更された文章は別の定型文として残します。</small></span></label><label class="radio-row"><input type="radio" name="import-mode" value="replace"><span><strong>すべて置き換え</strong><small>現在の定型文・カテゴリを削除し、このファイルの内容に入れ替えます。</small></span></label><button id="confirm-import" class="primary full">復元する</button></div></dialog>
+  <dialog id="copy-dialog" class="sheet compact" aria-labelledby="copy-heading"><header class="sheet-header"><h2 id="copy-heading">手動でコピー</h2><button class="text-button" data-close="copy-dialog">完了</button></header><div class="sheet-content"><p>自動コピーが許可されませんでした。下の本文を長押しして「すべてを選択」→「コピー」を選んでください。</p><label class="sr-only" for="manual-copy">コピーする本文</label><textarea id="manual-copy" rows="9" readonly spellcheck="false"></textarea><button id="select-copy" class="secondary full">本文をすべて選択</button><p class="field-hint">会社の設定でコピーや貼り付けが制限されている場合は、管理者へご相談ください。</p></div></dialog>
+  <dialog id="confirm-dialog" class="confirmation" aria-labelledby="confirm-heading"><form id="confirm-form"><h2 id="confirm-heading">確認</h2><p id="confirm-message"></p><label id="confirm-input-label" class="field" hidden>カテゴリ名<input id="confirm-input" maxlength="80" autocomplete="off"></label><div class="confirm-actions"><button type="button" id="confirm-no" class="secondary">キャンセル</button><button type="submit" id="confirm-yes" class="primary">実行</button></div></form></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <noscript><p class="error-banner">このアプリにはJavaScriptが必要です。端末の設定を確認してください。</p></noscript>
+</body>
+</html>

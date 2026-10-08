@@ -1,0 +1,16 @@
+{
+  "id": "./",
+  "name": "ことば — 定型文コピー",
+  "short_name": "ことば",
+  "description": "よく使う定型文を端末内に保存し、ワンタップでコピー。",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f7fa",
+  "theme_color": "#f6f7fa",
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
