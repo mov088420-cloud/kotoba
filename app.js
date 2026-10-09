@@ -1,11 +1,12 @@
 import * as db from './db.js';
 import { MAX_IMPORT_BYTES, parseBackup, makeBackup } from './data.js';
-import { decodeCliborFile, parseCliborCsv } from './clibor.js';
+import { decodeCliborFile, parseCliborCsv, planCliborRefresh } from './clibor.js';
 
 const $ = id => document.getElementById(id);
 let snapshot = {templates:[],categories:[]}, favoritesOnly = false, editing = null, editorInitial = '', editorBodyInitial = '', pendingImport = null;
 let registration, channel, toastTimer, refreshSerial = 0, databaseReady = false, confirmResolve;
 let previewing = null, cancelCurrentPress = null, cancelReleaseGuard = null;
+let pendingCliborPlan=null, pendingCliborGroups=false;
 const icons = {
   star:'M12 3 14.8 8.7 21 9.6 16.5 14 17.6 20.2 12 17.3 6.4 20.2 7.5 14 3 9.6 9.2 8.7Z',
   more:'M5 12h.01 M12 12h.01 M19 12h.01'
@@ -255,27 +256,50 @@ async function selectImport(event,isClibor=false){
   const file=event.target.files[0];event.target.value='';if(!file)return;clearError('settings-error');
   try{
     if(file.size>MAX_IMPORT_BYTES && !await confirmation({title:'大きなファイルを読み込みますか？',message:'20 MBを超えるファイルです。読み込みに時間がかかり、端末のメモリ不足で中断する場合があります。読み込みと検証だけでは既存データは変わりません。',action:'読み込む'}))return;
-    let detail='';
+    let detail='';pendingCliborPlan=null;
     if(isClibor){
       const decoded=decodeCliborFile(await file.arrayBuffer()),result=parseCliborCsv(decoded.text);pendingImport=result.backup;
-      detail=`${result.groupColumnPresent?'グループをカテゴリにします。':'グループ列がないため、カテゴリは「未分類」にします。'}メモをタイトルにします。メモが空・複数行・長い場合はタイトルを整えます（${result.generatedTitles}件）。元メモは編集画面に残し、本文は変更しません。ホットキーとマクロは動作しません。文字コード：${decoded.encoding}。`;
+      pendingCliborGroups=result.groupColumnPresent;
+      pendingCliborPlan=planCliborRefresh(await db.readAll(),pendingImport,pendingCliborGroups);
+      detail=`${result.groupColumnPresent?'グループをカテゴリにします。':'グループ列がないため、新規分は「未分類」にします。更新で対応できた前回分はカテゴリを引き継ぎます。'}メモをタイトルにします。メモが空・複数行・長い場合はタイトルを整えます（${result.generatedTitles}件）。元メモは編集画面に残し、本文は変更しません。ホットキーとマクロは動作しません。文字コード：${decoded.encoding}。`;
     }else pendingImport=parseBackup(await file.text());
     $('import-heading').textContent=isClibor?'Cliborの定型文を取り込む':'バックアップを復元';
     $('confirm-import').textContent=isClibor?'取り込む':'復元する';
     $('import-summary').textContent=`定型文 ${pendingImport.templates.length}件・カテゴリ ${pendingImport.categories.length}件を読み込みました。${detail}取り込み方法を選んでください。`;
-    document.querySelector('input[name=import-mode][value=merge]').checked=true;clearError('import-error');openDialog('import-dialog');
-  }catch(error){pendingImport=null;showError('settings-error',error);}
+    $('clibor-refresh-option').hidden=!isClibor;
+    document.querySelector(`input[name=import-mode][value=${pendingCliborPlan?.previous?'clibor-refresh':'merge'}]`).checked=true;
+    renderImportMode();clearError('import-error');openDialog('import-dialog');
+  }catch(error){pendingImport=null;pendingCliborPlan=null;showError('settings-error',error);}
 }
+function renderImportMode(){
+  const refresh=document.querySelector('input[name=import-mode]:checked').value==='clibor-refresh';
+  $('clibor-review').hidden=!refresh;
+  if(!refresh || !pendingCliborPlan)return;
+  const p=pendingCliborPlan;
+  $('clibor-review-summary').textContent=`更新 ${p.updated}件・追加／再作成 ${p.added}件・変更なし ${p.unchanged}件・前回分の削除 ${p.removed.length}件。iPhoneで直接作った ${p.manual}件は残します。${p.duplicates?`CSV内の完全に同じ ${p.duplicates}件は重複を省きます。`:''}`;
+  $('clibor-review-warning').textContent=`必ずCliborの全定型文を含む最新CSVを選んでください。CSVにない前回分は削除されます。Clibor由来のタイトル・本文はPC側の内容に揃えるため、iPhoneでの編集は上書きされます。${p.localChanges?`iPhoneでの編集を検出した ${p.localChanges}件も対象です。`:''}${p.legacy?`以前の形式で取り込んだ ${p.legacy}件は、iPhoneでの編集の有無を判別できません。`:''}固定IDがないため、対応を特定できない項目は削除・再作成され、お気に入りやカテゴリが引き継がれない場合があります。`;
+  const list=$('clibor-review-list');list.replaceChildren();
+  for(const row of p.rows){const li=element('li','',`${row.status}：${row.title}${row.localEdited?'（iPhoneでの編集を上書き）':''}`);if(row.oldTitle&&row.oldTitle!==row.title)li.append(element('small','muted',`以前：${row.oldTitle}`));list.append(li);}
+  for(const row of p.removed)list.append(element('li','refresh-removed',`前回分を削除：${row.title}`));
+}
+document.querySelectorAll('input[name=import-mode]').forEach(input=>input.addEventListener('change',renderImportMode));
 $('import-file').addEventListener('change',event=>selectImport(event));
 $('clibor-file').addEventListener('change',event=>selectImport(event,true));
-function cancelImport(){if($('confirm-import').disabled)return;pendingImport=null;closeDialog('import-dialog');}
+function cancelImport(){if($('confirm-import').disabled)return;pendingImport=null;pendingCliborPlan=null;closeDialog('import-dialog');}
 $('import-cancel').addEventListener('click',cancelImport);$('import-dialog').addEventListener('cancel',e=>{e.preventDefault();cancelImport();});
 $('confirm-import').addEventListener('click',async()=>{
   if(!pendingImport||$('confirm-import').disabled)return;
   const mode=document.querySelector('input[name=import-mode]:checked').value;
-  if(mode==='replace'&&!await confirmation({title:'現在のデータを置き換えますか？',message:`現在のすべての定型文・カテゴリを削除し、ファイル内の定型文 ${pendingImport.templates.length}件に置き換えます。必要なら先にバックアップしてください。この操作は取り消せません。`,action:'置き換える',danger:true}))return;
   $('confirm-import').disabled=true;
-  try{const result=await db.restoreBackup(pendingImport,mode);pendingImport=null;closeDialog('import-dialog');await changed();toast(mode==='merge'?`${result.added}件を追加・${result.skipped}件は重複を省略`:'復元しました');}catch(error){showError('import-error',error);}finally{$('confirm-import').disabled=false;}
+  try{
+    if(mode==='replace'&&!await confirmation({title:'現在のデータを置き換えますか？',message:`現在のすべての定型文・カテゴリを削除し、ファイル内の定型文 ${pendingImport.templates.length}件に置き換えます。必要なら先にバックアップしてください。この操作は取り消せません。`,action:'置き換える',danger:true}))return;
+    if(mode==='clibor-refresh'){
+      if(!pendingCliborPlan)throw new Error('CliborのCSVを選び直してください。');
+      if(!await confirmation({title:'Clibor分を最新CSVに更新しますか？',message:`前回のClibor分 ${pendingCliborPlan.previous}件を、CSVの ${pendingCliborPlan.next.templates.length-pendingCliborPlan.manual}件に揃えます。前回分のうち ${pendingCliborPlan.removed.length}件を削除します。Clibor由来のiPhoneでの編集は上書きされます。iPhoneで直接作った ${pendingCliborPlan.manual}件は残ります。必要なら先にJSONを書き出してください。この操作は取り消せません。`,action:'Clibor分を更新',danger:true}))return;
+    }
+    const result=mode==='clibor-refresh'?await db.refreshClibor(pendingImport,pendingCliborPlan.expected,pendingCliborGroups):await db.restoreBackup(pendingImport,mode);
+    pendingImport=null;pendingCliborPlan=null;closeDialog('import-dialog');await changed();toast(mode==='merge'?`${result.added}件を追加・${result.skipped}件は重複を省略`:mode==='clibor-refresh'?'Clibor分を更新しました':'復元しました');
+  }catch(error){showError('import-error',error);}finally{$('confirm-import').disabled=false;}
 });
 
 function setOfflineStatus(ready,message){$('offline-status').dataset.ready=String(ready);$('offline-label').textContent=message;$('settings-offline').textContent=message;}
