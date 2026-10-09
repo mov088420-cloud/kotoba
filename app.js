@@ -8,9 +8,12 @@ let registration, channel, toastTimer, refreshSerial = 0, databaseReady = false,
 let previewing = null, cancelCurrentPress = null, cancelReleaseGuard = null;
 let pendingCliborPlan=null, pendingCliborGroups=false;
 let currentSort='registered';
+const selectedIds=new Set();
+let bulkBusy=false,pendingBulkTargets=[];
 const icons = {
   star:'M12 3 14.8 8.7 21 9.6 16.5 14 17.6 20.2 12 17.3 6.4 20.2 7.5 14 3 9.6 9.2 8.7Z',
-  more:'M5 12h.01 M12 12h.01 M19 12h.01'
+  more:'M5 12h.01 M12 12h.01 M19 12h.01',
+  check:'M5 12l4 4L19 6'
 };
 function icon(name) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
@@ -128,12 +131,61 @@ function attachTemplateGesture(button,entry) {
   });
 }
 document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelCurrentPress?.();cancelReleaseGuard?.();}});
+function selectedEntries(){return snapshot.templates.filter(t=>selectedIds.has(t.id));}
+function updateSelectionUI(){
+  const entries=selectedEntries(),count=entries.length,allFavorite=count>0&&entries.every(t=>t.favorite);
+  $('new-template').hidden=count>0;$('bulk-actions').hidden=!count;
+  $('selected-count').textContent=`${count}件`;$('selected-count').setAttribute('aria-label',`${count}件選択中`);
+  $('bulk-favorite-label').textContent=allFavorite?'解除':'お気に入り';
+  $('bulk-favorite').setAttribute('aria-label',`選択した${count}件をお気に入り${allFavorite?'から外す':'にする'}`);
+  $('bulk-favorite').classList.toggle('is-favorite',allFavorite);
+  for(const id of ['bulk-favorite','bulk-category','clear-selection'])$(id).disabled=bulkBusy||!databaseReady;
+  for(const button of document.querySelectorAll('.select-button')){
+    const selected=selectedIds.has(button.dataset.selectId);
+    button.setAttribute('aria-checked',String(selected));button.disabled=bulkBusy||!databaseReady;
+    button.closest('.card').classList.toggle('selected',selected);
+  }
+}
+function clearSelection(){selectedIds.clear();updateSelectionUI();}
+$('clear-selection').addEventListener('click',clearSelection);
+async function applyBulk(targets,patch,errorId){
+  if(bulkBusy||!databaseReady||!targets.length)return false;
+  bulkBusy=true;updateSelectionUI();clearError(errorId);$('bulk-save').disabled=true;$('bulk-cancel').disabled=true;
+  try{
+    await db.updateTemplates(targets,patch);await changed();
+    if(errorId==='main-error')toast(`${targets.length}件のお気に入りを設定しました`);return true;
+  }catch(error){showError(errorId,error);return false;}
+  finally{bulkBusy=false;updateSelectionUI();$('bulk-save').disabled=$('bulk-category-select').selectedIndex===0;$('bulk-cancel').disabled=false;}
+}
+$('bulk-favorite').addEventListener('click',()=>{
+  const entries=selectedEntries();
+  applyBulk(entries.map(t=>({id:t.id,updatedAt:t.updatedAt})),{favorite:!entries.every(t=>t.favorite)},'main-error');
+});
+$('bulk-category').addEventListener('click',()=>{
+  if(bulkBusy||!databaseReady)return;
+  pendingBulkTargets=selectedEntries().map(t=>({id:t.id,updatedAt:t.updatedAt}));
+  if(!pendingBulkTargets.length)return;
+  clearError('bulk-error');$('bulk-summary').textContent=`選択した${pendingBulkTargets.length}件のカテゴリを設定します。`;
+  const select=$('bulk-category-select'),placeholder=new Option('カテゴリを選択','');placeholder.disabled=true;
+  select.replaceChildren(placeholder,new Option('未分類','none'));
+  for(const c of [...snapshot.categories].sort((a,b)=>a.name.localeCompare(b.name,'ja')))select.add(new Option(c.name,`category:${c.id}`));
+  select.selectedIndex=0;$('bulk-save').disabled=true;openDialog('bulk-category-dialog');
+});
+$('bulk-category-select').addEventListener('change',()=>{$('bulk-save').disabled=bulkBusy||$('bulk-category-select').selectedIndex===0;});
+$('bulk-category-form').addEventListener('submit',async event=>{
+  event.preventDefault();const select=$('bulk-category-select');if(select.selectedIndex===0||bulkBusy)return;
+  const value=select.value;
+  if(await applyBulk(pendingBulkTargets,{categoryId:value==='none'?null:value.slice(9)},'bulk-error')){closeDialog('bulk-category-dialog');toast(`${pendingBulkTargets.length}件のカテゴリを設定しました`);}
+});
+$('bulk-category-dialog').addEventListener('cancel',event=>{if(bulkBusy)event.preventDefault();});
 function renderList() {
   cancelCurrentPress?.();
   const q=$('search').value.toLocaleLowerCase('ja').trim(), category=$('category-filter').value;
   const rows=snapshot.templates.filter(t => (!favoritesOnly || t.favorite) && (!category || (category==='__none__' ? t.categoryId===null : t.categoryId===category.slice(9))) && (!q || t.title.toLocaleLowerCase('ja').includes(q) || t.body.toLocaleLowerCase('ja').includes(q)));
   if($('sort').value==='title')rows.sort((a,b)=>a.title.localeCompare(b.title,'ja') || b.updatedAt-a.updatedAt);
   else if($('sort').value==='updated')rows.sort((a,b)=>b.updatedAt-a.updatedAt || a.id.localeCompare(b.id));
+  const visibleIds=new Set(rows.map(t=>t.id));
+  for(const id of selectedIds)if(!visibleIds.has(id))selectedIds.delete(id);
   $('total-count').textContent=`${snapshot.templates.length}件`;
   $('result-count').textContent=rows.length?`${rows.length}件の定型文`:'';
   const fragment=document.createDocumentFragment();
@@ -148,13 +200,17 @@ function renderList() {
     const details=element('button','details-button');details.append(icon('more'));
     details.setAttribute('aria-label',`${t.title}の全文を見る`);details.setAttribute('aria-haspopup','dialog');
     details.addEventListener('click',()=>openPreview(t));
-    card.append(content,favorite,details);fragment.append(card);
+    const select=element('button','select-button');select.type='button';select.setAttribute('role','checkbox');select.dataset.selectId=t.id;
+    select.setAttribute('aria-label',`${t.title}を選択`);select.setAttribute('aria-describedby','selection-help');
+    const mark=element('span','selection-mark');mark.setAttribute('aria-hidden','true');mark.append(icon('check'));select.append(mark);
+    select.addEventListener('click',()=>{if(bulkBusy)return;selectedIds.has(t.id)?selectedIds.delete(t.id):selectedIds.add(t.id);updateSelectionUI();});
+    card.append(select,content,favorite,details);fragment.append(card);
   }
   $('cards').replaceChildren(fragment); $('empty-state').hidden=rows.length>0;
   const hasData=snapshot.templates.length>0;
   $('empty-title').textContent=hasData?'該当する定型文がありません':'いつもの言葉を、すぐに。';
   $('empty-description').textContent=hasData?'検索ワードや絞り込みを変えてみてください。':'よく使う文章を登録して、ワンタップでコピーできます。';
-  $('empty-add').hidden=hasData || !databaseReady;
+  $('empty-add').hidden=hasData || !databaseReady;updateSelectionUI();
 }
 function manualCopy(body) { $('manual-copy').value=body; openDialog('copy-dialog'); }
 function copyBody(body,button) {
@@ -362,7 +418,7 @@ document.addEventListener('visibilitychange',()=>{if(document.visibilityState===
 async function start(){
   $('new-template').disabled=true;$('categories-open').disabled=true;
   try{
-    await db.openDatabase(()=>{databaseReady=false;$('new-template').disabled=true;showError('main-error',new Error('アプリが更新されました。保存していない文章を控え、この画面を再読み込みしてください。'));});
+    await db.openDatabase(()=>{databaseReady=false;$('new-template').disabled=true;updateSelectionUI();showError('main-error',new Error('アプリが更新されました。保存していない文章を控え、この画面を再読み込みしてください。'));});
     databaseReady=true;applyTheme((await db.getSetting('theme'))||'system');await refresh();$('new-template').disabled=false;$('categories-open').disabled=false;
     if('BroadcastChannel' in window){channel=new BroadcastChannel(`kotoba-local-changes:${new URL('./',import.meta.url).pathname}`);channel.onmessage=()=>refresh().catch(error=>showError('main-error',error));}
   }catch(error){showError('main-error',error);$('empty-title').textContent='保存領域を開けませんでした';$('empty-description').textContent='Safariの通常モード、端末の空き容量、会社の設定をご確認ください。';$('empty-state').hidden=false;$('empty-add').hidden=true;}
