@@ -7,6 +7,7 @@ let snapshot = {templates:[],categories:[]}, favoritesOnly = false, editing = nu
 let registration, channel, toastTimer, refreshSerial = 0, databaseReady = false, confirmResolve;
 let previewing = null, cancelCurrentPress = null, cancelReleaseGuard = null;
 let pendingCliborPlan=null, pendingCliborGroups=false;
+let currentSort='registered';
 const icons = {
   star:'M12 3 14.8 8.7 21 9.6 16.5 14 17.6 20.2 12 17.3 6.4 20.2 7.5 14 3 9.6 9.2 8.7Z',
   more:'M5 12h.01 M12 12h.01 M19 12h.01'
@@ -131,7 +132,8 @@ function renderList() {
   cancelCurrentPress?.();
   const q=$('search').value.toLocaleLowerCase('ja').trim(), category=$('category-filter').value;
   const rows=snapshot.templates.filter(t => (!favoritesOnly || t.favorite) && (!category || (category==='__none__' ? t.categoryId===null : t.categoryId===category.slice(9))) && (!q || t.title.toLocaleLowerCase('ja').includes(q) || t.body.toLocaleLowerCase('ja').includes(q)));
-  rows.sort($('sort').value==='title' ? (a,b)=>a.title.localeCompare(b.title,'ja') || b.updatedAt-a.updatedAt : (a,b)=>b.updatedAt-a.updatedAt || a.id.localeCompare(b.id));
+  if($('sort').value==='title')rows.sort((a,b)=>a.title.localeCompare(b.title,'ja') || b.updatedAt-a.updatedAt);
+  else if($('sort').value==='updated')rows.sort((a,b)=>b.updatedAt-a.updatedAt || a.id.localeCompare(b.id));
   $('total-count').textContent=`${snapshot.templates.length}件`;
   $('result-count').textContent=rows.length?`${rows.length}件の定型文`:'';
   const fragment=document.createDocumentFragment();
@@ -165,12 +167,19 @@ function copyBody(body,button) {
 }
 $('select-copy').addEventListener('click',()=>{ const text=$('manual-copy');text.focus();text.select();text.setSelectionRange(0,text.value.length); });
 async function refresh() {
-  const serial=++refreshSerial, next=await db.readAll();
+  const serial=++refreshSerial, [next,sort]=await Promise.all([db.readAll(),db.getSetting('listSort')]);
   if(serial!==refreshSerial)return;
+  currentSort=['registered','updated','title'].includes(sort)?sort:'registered';$('sort').value=currentSort;
   snapshot=next; fillCategories($('category-filter'),'すべてのカテゴリ','',$('category-filter').value); renderList(); renderCategories();
 }
 async function changed() { clearError('main-error');await refresh();channel?.postMessage('changed'); }
-$('search').addEventListener('input',renderList);$('category-filter').addEventListener('change',renderList);$('sort').addEventListener('change',renderList);
+$('search').addEventListener('input',renderList);$('category-filter').addEventListener('change',renderList);
+$('sort').addEventListener('change',async()=>{
+  const selected=$('sort').value,previous=currentSort;$('sort').disabled=true;
+  try{await db.putSetting('listSort',selected);currentSort=selected;renderList();channel?.postMessage('changed');}
+  catch(error){$('sort').value=previous;renderList();showError('main-error',error);}
+  finally{$('sort').disabled=false;}
+});
 function setFavorites(value){favoritesOnly=value;$('filter-all').setAttribute('aria-pressed',String(!value));$('filter-favorites').setAttribute('aria-pressed',String(value));renderList();}
 $('filter-all').addEventListener('click',()=>setFavorites(false));$('filter-favorites').addEventListener('click',()=>setFavorites(true));
 
@@ -267,12 +276,14 @@ async function selectImport(event,isClibor=false){
     $('confirm-import').textContent=isClibor?'取り込む':'復元する';
     $('import-summary').textContent=`定型文 ${pendingImport.templates.length}件・カテゴリ ${pendingImport.categories.length}件を読み込みました。${detail}取り込み方法を選んでください。`;
     $('clibor-refresh-option').hidden=!isClibor;
+    $('json-order-option').hidden=isClibor;
     document.querySelector(`input[name=import-mode][value=${pendingCliborPlan?.previous?'clibor-refresh':'merge'}]`).checked=true;
     renderImportMode();clearError('import-error');openDialog('import-dialog');
   }catch(error){pendingImport=null;pendingCliborPlan=null;showError('settings-error',error);}
 }
 function renderImportMode(){
-  const refresh=document.querySelector('input[name=import-mode]:checked').value==='clibor-refresh';
+  const mode=document.querySelector('input[name=import-mode]:checked').value,refresh=mode==='clibor-refresh';
+  $('confirm-import').textContent=mode==='order-only'?'順番を合わせる':pendingCliborPlan?'取り込む':'復元する';
   $('clibor-review').hidden=!refresh;
   if(!refresh || !pendingCliborPlan)return;
   const p=pendingCliborPlan;
@@ -298,7 +309,7 @@ $('confirm-import').addEventListener('click',async()=>{
       if(!await confirmation({title:'Clibor分を最新CSVに更新しますか？',message:`前回のClibor分 ${pendingCliborPlan.previous}件を、CSVの ${pendingCliborPlan.next.templates.length-pendingCliborPlan.manual}件に揃えます。前回分のうち ${pendingCliborPlan.removed.length}件を削除します。Clibor由来のiPhoneでの編集は上書きされます。iPhoneで直接作った ${pendingCliborPlan.manual}件は残ります。必要なら先にJSONを書き出してください。この操作は取り消せません。`,action:'Clibor分を更新',danger:true}))return;
     }
     const result=mode==='clibor-refresh'?await db.refreshClibor(pendingImport,pendingCliborPlan.expected,pendingCliborGroups):await db.restoreBackup(pendingImport,mode);
-    pendingImport=null;pendingCliborPlan=null;closeDialog('import-dialog');await changed();toast(mode==='merge'?`${result.added}件を追加・${result.skipped}件は重複を省略`:mode==='clibor-refresh'?'Clibor分を更新しました':'復元しました');
+    pendingImport=null;pendingCliborPlan=null;closeDialog('import-dialog');await changed();toast(mode==='order-only'?`${result.ordered}件の順番を合わせました${result.ignored?`・${result.ignored}件は未登録`:''}`:mode==='merge'?`${result.added}件を追加・${result.skipped}件は重複を省略`:mode==='clibor-refresh'?'Clibor分を更新しました':'復元しました');
   }catch(error){showError('import-error',error);}finally{$('confirm-import').disabled=false;}
 });
 
