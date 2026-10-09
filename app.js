@@ -5,9 +5,10 @@ import { decodeCliborFile, parseCliborCsv } from './clibor.js';
 const $ = id => document.getElementById(id);
 let snapshot = {templates:[],categories:[]}, favoritesOnly = false, editing = null, editorInitial = '', editorBodyInitial = '', pendingImport = null;
 let registration, channel, toastTimer, refreshSerial = 0, databaseReady = false, confirmResolve;
+let previewing = null, cancelCurrentPress = null, cancelReleaseGuard = null;
 const icons = {
   star:'M12 3 14.8 8.7 21 9.6 16.5 14 17.6 20.2 12 17.3 6.4 20.2 7.5 14 3 9.6 9.2 8.7Z',
-  copy:'M9 8h10v13H9z M15 8V3H4v13h5'
+  more:'M5 12h.01 M12 12h.01 M19 12h.01'
 };
 function icon(name) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
@@ -52,25 +53,99 @@ function fillCategories(select,firstText,firstValue,selected) {
   for(const c of [...snapshot.categories].sort((a,b)=>a.name.localeCompare(b.name,'ja'))) select.add(new Option(c.name,select.id==='category-filter'?`category:${c.id}`:c.id));
   select.value=[...select.options].some(o=>o.value===selected)?selected:firstValue;
 }
+function openPreview(entry) {
+  previewing=entry;
+  $('preview-heading').textContent=entry.title;
+  $('preview-category').textContent=snapshot.categories.find(c=>c.id===entry.categoryId)?.name || '未分類';
+  $('preview-body').textContent=entry.body;
+  $('preview-body').scrollTop=0;
+  $('preview-edit').setAttribute('aria-label',`${entry.title}を編集`);
+  openDialog('preview-dialog');
+}
+$('preview-dialog').addEventListener('close',()=>{previewing=null;});
+$('preview-edit').addEventListener('click',()=>{
+  const entry=previewing;
+  closeDialog('preview-dialog');
+  if(entry)openEditor(snapshot.templates.find(t=>t.id===entry.id) || entry);
+});
+function guardLongPressRelease(pointerId) {
+  cancelReleaseGuard?.();
+  const controller=new AbortController(),options={capture:true,signal:controller.signal};
+  let timer=setTimeout(cleanup,15000);
+  function cleanup(){clearTimeout(timer);controller.abort();if(cancelReleaseGuard===cleanup)cancelReleaseGuard=null;}
+  cancelReleaseGuard=cleanup;
+  document.addEventListener('click',event=>{
+    if(event.detail===0)return; // Keyboard activation remains available.
+    event.preventDefault();event.stopImmediatePropagation();cleanup();
+  },options);
+  document.addEventListener('pointerdown',cleanup,options); // A new tap is a new intent.
+  const released=event=>{if(event.pointerId===pointerId){clearTimeout(timer);timer=setTimeout(cleanup,700);}};
+  document.addEventListener('pointerup',released,options);
+  document.addEventListener('pointercancel',released,options);
+}
+function attachTemplateGesture(button,entry) {
+  let blockClick=false;
+  button.addEventListener('pointerdown',event=>{
+    cancelCurrentPress?.();
+    if(!event.isPrimary || event.button!==0)return;
+    blockClick=false;
+    const controller=new AbortController(),options={capture:true,signal:controller.signal};
+    const {pointerId,clientX,clientY}=event;
+    let timer=setTimeout(()=>{
+      blockClick=true;
+      finish();
+      guardLongPressRelease(pointerId);
+      openPreview(entry);
+    },500);
+    button.classList.add('pressing');
+    function finish(){clearTimeout(timer);controller.abort();button.classList.remove('pressing');if(cancelCurrentPress===cancel)cancelCurrentPress=null;}
+    function cancel(){blockClick=true;finish();}
+    cancelCurrentPress=cancel;
+    document.addEventListener('pointermove',move=>{
+      if(move.pointerId===pointerId && Math.hypot(move.clientX-clientX,move.clientY-clientY)>12)cancel();
+    },options);
+    document.addEventListener('pointerup',up=>{if(up.pointerId===pointerId)finish();},options);
+    document.addEventListener('pointercancel',cancel,options);
+    document.addEventListener('pointerdown',down=>{if(down.pointerId!==pointerId)cancel();},options);
+    document.addEventListener('scroll',cancel,options);
+    window.addEventListener('blur',cancel,{signal:controller.signal});
+  });
+  button.addEventListener('click',event=>{
+    if(blockClick && event.detail!==0){event.preventDefault();return;}
+    // Copy stays directly inside the trusted click; no timer or DB read precedes it.
+    copyBody(entry.body,button);
+  });
+  button.addEventListener('contextmenu',event=>{
+    event.preventDefault();blockClick=true;cancelCurrentPress?.();
+    if(!$('preview-dialog').open)openPreview(entry);
+  });
+  button.addEventListener('keydown',event=>{
+    if((event.key==='Enter'&&event.shiftKey) || event.key==='ContextMenu' || (event.key==='F10'&&event.shiftKey)){
+      event.preventDefault();cancelCurrentPress?.();openPreview(entry);
+    }
+  });
+}
+document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelCurrentPress?.();cancelReleaseGuard?.();}});
 function renderList() {
+  cancelCurrentPress?.();
   const q=$('search').value.toLocaleLowerCase('ja').trim(), category=$('category-filter').value;
   const rows=snapshot.templates.filter(t => (!favoritesOnly || t.favorite) && (!category || (category==='__none__' ? t.categoryId===null : t.categoryId===category.slice(9))) && (!q || t.title.toLocaleLowerCase('ja').includes(q) || t.body.toLocaleLowerCase('ja').includes(q)));
   rows.sort($('sort').value==='title' ? (a,b)=>a.title.localeCompare(b.title,'ja') || b.updatedAt-a.updatedAt : (a,b)=>b.updatedAt-a.updatedAt || a.id.localeCompare(b.id));
   $('total-count').textContent=`${snapshot.templates.length}件`;
   $('result-count').textContent=rows.length?`${rows.length}件の定型文`:'';
-  const categoryNames=new Map(snapshot.categories.map(c=>[c.id,c.name])), fragment=document.createDocumentFragment();
+  const fragment=document.createDocumentFragment();
   for(const t of rows) {
-    const card=element('article','card'), top=element('div','card-top');
-    top.append(element('h2','card-title',t.title));
+    const card=element('article','card'), content=element('button','template-tap');
+    content.type='button';content.setAttribute('aria-label',`${t.title}をコピー`);
+    content.setAttribute('aria-describedby','list-help');
+    content.append(element('span','card-title',t.title),element('span','card-preview',t.body.replace(/[\r\n]+/g,' ').slice(0,500)));
+    attachTemplateGesture(content,t);
     const favorite=element('button','favorite-button'); favorite.append(icon('star')); favorite.setAttribute('aria-pressed',String(t.favorite)); favorite.setAttribute('aria-label',`${t.title}をお気に入り${t.favorite?'から外す':'にする'}`);
     favorite.addEventListener('click',async()=>{ favorite.disabled=true; try { await db.saveTemplate({...t,favorite:!t.favorite},t.updatedAt); await changed(); } catch(error){showError('main-error',error);favorite.disabled=false;} });
-    top.append(favorite); card.append(top,element('p','card-preview',t.body.slice(0,500)));
-    const bottom=element('div','card-bottom'); bottom.append(element('span','category-badge',categoryNames.get(t.categoryId)||'未分類'));
-    const edit=element('button','edit-button','編集');edit.setAttribute('aria-label',`${t.title}を編集`); edit.addEventListener('click',()=>openEditor(t));
-    const copy=element('button','copy-button');copy.append(icon('copy'),document.createTextNode('コピー'));copy.setAttribute('aria-label',`${t.title}をコピー`);
-    // Body is already in memory. No await/DB lookup precedes this clipboard call.
-    copy.addEventListener('click',()=>copyBody(t.body,copy));
-    bottom.append(edit,copy);card.append(bottom);fragment.append(card);
+    const details=element('button','details-button');details.append(icon('more'));
+    details.setAttribute('aria-label',`${t.title}の全文を見る`);details.setAttribute('aria-haspopup','dialog');
+    details.addEventListener('click',()=>openPreview(t));
+    card.append(content,favorite,details);fragment.append(card);
   }
   $('cards').replaceChildren(fragment); $('empty-state').hidden=rows.length>0;
   const hasData=snapshot.templates.length>0;
