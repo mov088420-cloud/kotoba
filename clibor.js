@@ -67,3 +67,53 @@ export function parseCliborCsv(text,newId=uid,now=Date.now()) {
   const backup=validateBackup({format:FORMAT,version:BACKUP_VERSION,categories,templates});
   return {backup,generatedTitles,groupColumnPresent:format.length===4};
 }
+
+// Full CSV snapshot refresh. CSV has no stable IDs: uncertain identities are never guessed.
+export function snapshotSignature(snapshot) {
+  return JSON.stringify({categories:[...snapshot.categories].sort((a,b)=>a.id.localeCompare(b.id)),templates:[...snapshot.templates].sort((a,b)=>a.id.localeCompare(b.id))});
+}
+export function planCliborRefresh(current,raw,hasGroups=false,newId=uid,now=Date.now()) {
+  const incoming=validateBackup(raw);
+  if(typeof hasGroups!=='boolean' || !incoming.templates.length || incoming.templates.some(t=>!t.clibor || (!hasGroups&&t.categoryId!==null))) throw new Error('Cliborの全定型文を含むCSVを選び直してください。');
+  const previous=current.templates.filter(t=>t.clibor),manual=current.templates.filter(t=>!t.clibor);
+  const categories=current.categories.map(c=>({...c})),names=new Map(categories.map(c=>[c.name,c.id]));
+  const categoryIds=new Set(categories.map(c=>c.id)),ids=new Set(current.templates.map(t=>t.id)),catMap=new Map();
+  const fresh=used=>{let id;do{id=newId();}while(used.has(id));used.add(id);return id;};
+  for(const c of incoming.categories){let id=names.get(c.name);if(!id){id=categoryIds.has(c.id)?fresh(categoryIds):c.id;categoryIds.add(id);categories.push({id,name:c.name});names.set(c.name,id);}catMap.set(c.id,id);}
+  const unique=[],seen=new Set();let duplicates=0;
+  for(const t of incoming.templates){const key=JSON.stringify([t.title,t.body,t.categoryId,t.clibor.note,t.clibor.hotkey]);if(seen.has(key)){duplicates++;continue;}seen.add(key);unique.push(t);}
+  const matches=new Map(),used=new Set();
+  const source=t=>t.clibor.source || {title:t.title,body:t.body};
+  // A match requires uniqueness in both complete lists, even after other matches were found.
+  const match=(oldKey,newKey)=>{
+    const oldMap=new Map(),newMap=new Map();
+    const collect=(map,key,t)=>{if(key!==null){const list=map.get(key)||[];list.push(t);map.set(key,list);}};
+    previous.forEach(t=>collect(oldMap,oldKey(t),t));unique.forEach(t=>collect(newMap,newKey(t),t));
+    for(const [key,next] of newMap){const old=oldMap.get(key);if(next.length===1&&old?.length===1&&!matches.has(next[0].id)&&!used.has(old[0].id)){matches.set(next[0].id,old[0]);used.add(old[0].id);}}
+  };
+  match(t=>JSON.stringify([source(t).body,t.clibor.note,t.clibor.hotkey]),t=>JSON.stringify([t.body,t.clibor.note,t.clibor.hotkey]));
+  match(t=>t.clibor.note.trim()?t.clibor.note:null,t=>t.clibor.note.trim()?t.clibor.note:null);
+  match(t=>t.clibor.hotkey.trim()?t.clibor.hotkey:null,t=>t.clibor.hotkey.trim()?t.clibor.hotkey:null);
+  match(t=>source(t).body,t=>t.body);
+  const rows=[];let added=0,updated=0,unchanged=0,localChanges=0,legacy=0;
+  const templates=manual.map(t=>structuredClone(t));
+  for(const t of unique){
+    const old=matches.get(t.id),categoryId=hasGroups?(t.categoryId===null?null:catMap.get(t.categoryId)):(old?.categoryId ?? null);
+    const changed=old && (old.title!==t.title || old.body!==t.body || old.categoryId!==categoryId || old.clibor.note!==t.clibor.note || old.clibor.hotkey!==t.clibor.hotkey);
+    const localEdited=old?.clibor.source && (old.title!==source(old).title || old.body!==source(old).body) && (old.title!==t.title || old.body!==t.body);
+    if(localEdited)localChanges++;
+    if(old&&!old.clibor.source)legacy++;
+    let id=old?.id || t.id;if(!old&&ids.has(id))id=fresh(ids);ids.add(id);
+    const next={...t,id,categoryId,favorite:old?.favorite ?? false,createdAt:old?.createdAt ?? t.createdAt,updatedAt:old?(changed?Math.max(now,old.updatedAt+1):old.updatedAt):t.updatedAt,clibor:{note:t.clibor.note,hotkey:t.clibor.hotkey,source:{title:t.title,body:t.body}}};
+    templates.push(next);
+    const status=!old?'追加・再作成':changed?'更新':'変更なし';
+    if(!old)added++;else if(changed)updated++;else unchanged++;
+    rows.push({title:t.title,oldTitle:old?.title,status,localEdited:!!localEdited});
+  }
+  const removed=previous.filter(t=>!used.has(t.id));
+  localChanges+=removed.filter(t=>t.clibor.source&&(t.title!==source(t).title||t.body!==source(t).body)).length;
+  legacy=previous.filter(t=>!t.clibor.source).length;
+  // Validate the entire proposed result before opening a write transaction.
+  const next=validateBackup({format:FORMAT,version:BACKUP_VERSION,categories,templates});
+  return {next,expected:snapshotSignature(current),rows,removed:removed.map(t=>({id:t.id,title:t.title})),previous:previous.length,manual:manual.length,added,updated,unchanged,duplicates,localChanges,legacy};
+}
