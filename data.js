@@ -52,6 +52,12 @@ export function parseBackup(text) {
 export function makeBackup(snapshot) {
   return { ...validateBackup({ format:FORMAT, version:BACKUP_VERSION, ...snapshot }), exportedAt:new Date().toISOString() };
 }
+export function orderTemplates(templates,ids) {
+  const byId=new Map(templates.map(t=>[t.id,t])),ordered=[];
+  for(const id of ids){if(byId.has(id)){ordered.push(byId.get(id));byId.delete(id);}}
+  for(const t of templates)if(byId.has(t.id)){ordered.push(t);byId.delete(t.id);}
+  return ordered;
+}
 export function mergeBackup(current, incoming, newId = uid) {
   const categories = current.categories.map(c => ({...c}));
   const templates = current.templates.map(t => ({...t}));
@@ -68,13 +74,14 @@ export function mergeBackup(current, incoming, newId = uid) {
   }
   // Explicit tuples avoid object-key injection and ignore timestamps when identifying identical content.
   const key = t => JSON.stringify([t.title,t.body,t.categoryId,t.favorite,t.clibor?.note || '',t.clibor?.hotkey || '']);
-  const content = new Set(templates.map(key));
+  const content = new Map();for(const t of templates)if(!content.has(key(t)))content.set(key(t),t);
+  const importOrder=[];
   let added = 0, skipped = 0;
   for (const item of incoming.templates) {
     const t = {...item, categoryId:item.categoryId === null ? null : categoryMap.get(item.categoryId)};
-    if (content.has(key(t))) { skipped++; continue; }
+    if (content.has(key(t))) { importOrder.push(content.get(key(t)).id);skipped++;continue; }
     if (ids.has(t.id)) t.id = fresh(ids);
-    ids.add(t.id); content.add(key(t)); templates.push(t); added++;
+    ids.add(t.id); content.set(key(t),t); templates.push(t);importOrder.push(t.id);added++;
   }
-  return {categories,templates,added,skipped};
+  return {categories,templates:orderTemplates(templates,importOrder),added,skipped};
 }
