@@ -38,3 +38,21 @@
 #clibor-review-list li{padding:6px 0;border-bottom:1px solid var(--line)}
 #clibor-review-list small{display:block}
 .refresh-removed{color:var(--danger)}
+
+/* Selection occupies the existing row height; its visible mark is only 18px. */
+.card{grid-template-columns:44px minmax(0,1fr) 44px 44px}
+.template-tap{padding-left:0}
+.select-button{width:44px;align-self:stretch;min-height:44px;padding:0;display:grid;place-items:center;touch-action:pan-y pinch-zoom}
+.select-button:focus-visible{outline-offset:-3px}
+.selection-mark{display:grid;place-items:center;width:18px;height:18px;border:1.5px solid var(--muted);border-radius:50%;color:var(--surface)}
+.selection-mark svg{width:12px;height:12px;stroke-width:2.5}
+.select-button[aria-checked=false] svg{visibility:hidden}
+.select-button[aria-checked=true] .selection-mark{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+.card.selected{border-color:var(--accent);background:var(--tint)}
+.bulk-actions{display:flex;align-items:center;gap:6px;max-width:636px;width:100%;min-height:52px}
+.selected-count{font-size:13px;font-weight:650;white-space:nowrap;min-width:30px;text-align:center}
+.bulk-button{display:flex;gap:5px;align-items:center;justify-content:center;flex:1;min-width:0;min-height:52px;padding:8px 6px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--accent);font-size:13px;white-space:nowrap}
+.bulk-button svg{width:18px;height:18px}
+.bulk-button.is-favorite svg{fill:var(--tint)}
+.bulk-clear{width:44px;min-height:52px;padding:8px;font-size:24px;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:12px}
+@media(min-width:700px){.bulk-actions{pointer-events:auto;padding:0 8px;border-radius:16px;background:var(--bg);box-shadow:var(--shadow)}}
