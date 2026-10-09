@@ -95,6 +95,32 @@ export function saveTemplate(input, expectedUpdatedAt = null) {
     };
   });
 }
+// Validate every selected version before writing; any error rolls the entire batch back.
+export function updateTemplates(targets,patch) {
+  if(!Array.isArray(targets)||!targets.length||targets.some(t=>!t||typeof t.id!=='string'||!Number.isFinite(t.updatedAt))||new Set(targets.map(t=>t.id)).size!==targets.length)
+    return Promise.reject(new Error('選択した定型文を確認してください。'));
+  const keys=Object.keys(patch||{});
+  if(!keys.length||keys.some(key=>!['favorite','categoryId'].includes(key))||('favorite' in patch&&typeof patch.favorite!=='boolean')||('categoryId' in patch&&patch.categoryId!==null&&(typeof patch.categoryId!=='string'||!patch.categoryId)))
+    return Promise.reject(new Error('一括設定の内容が不正です。'));
+  return transaction(['templates','categories','settings'],'readwrite',(tx,set,abort)=>{
+    getSnapshot(tx,current=>{
+      if('categoryId' in patch&&patch.categoryId!==null&&!current.categories.some(c=>c.id===patch.categoryId))
+        throw new Error('選択したカテゴリは削除されています。カテゴリを選び直してください。');
+      const entries=new Map(current.templates.map(t=>[t.id,t]));
+      const selected=targets.map(target=>{
+        const entry=entries.get(target.id);
+        if(!entry||entry.updatedAt!==target.updatedAt)throw new Error('選択した定型文が別の画面で変更されました。一覧を更新して選び直してください。変更は保存していません。');
+        return entry;
+      });
+      const modified=selected.filter(entry=>keys.some(key=>entry[key]!==patch[key]));
+      const time=Date.now(),store=tx.objectStore('templates');
+      for(const entry of modified)store.put({...entry,...patch,updatedAt:Math.max(time,entry.updatedAt+1)});
+      // Preserve the logical order even when upgrading a legacy database without templateOrder.
+      if(modified.length)tx.objectStore('settings').put({key:'templateOrder',value:current.templates.map(t=>t.id)});
+      set({selected:selected.length,updated:modified.length});
+    },abort);
+  });
+}
 export function deleteTemplate(id, expectedUpdatedAt) {
   return transaction(['templates'],'readwrite',(tx,set,abort) => {
     const store = tx.objectStore('templates');
