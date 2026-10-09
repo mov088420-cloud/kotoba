@@ -120,3 +120,15 @@ CSVにstable IDはありません。`planCliborRefresh` は全CSVスナップシ
 UIでは変更一覧・件数・上書き注意を表示し、追加の破壊操作確認を通します。確認時点の全テンプレート・カテゴリを順序非依存のsignatureとしてメモリに保持し、readwrite transaction内で再照合します。異なれば一切書かず拒否します。同じtransaction内で計画を再検証し、Clibor分のdelete/putとカテゴリputを実行します。途中のQuotaExceededErrorでも削除を含めてabort。手動作成レコードはdelete/putの対象にしません。signatureは暗号認証ではなく、同端末の別画面からの変更検出です。
 
 操作履歴・通信・自動実行・ファイル転送機能は追加しません。選択CSVをブラウザのFile APIで読み、既存CSP（connect-src 'none'）を維持します。
+
+## JSONの配列順を保持（1.3.1）
+
+表示順を本文のupdatedAt/UUIDから分離し、既存settingsストアの`templateOrder`へID配列、`listSort`へregistered/updated/titleを端末内で保存します。ストア・索引の変更はなくDB_VERSION=1のままです。旧データに順序情報がなければ以前と同じupdatedAt降順＋ID昇順で読み、データは削除しません。旧JSONを再取り込み、または順番だけ適用して元のファイル順を復元できます。
+
+`getSnapshot`は3ストアから読み、保存済みID順を適用します。削除済み・重複IDは無視し、未指定の既存分を後ろへ残します。`saveTemplate`は更新前の順番を同じreadwrite transactionで保持し、新規IDのみ末尾に追加。本文編集・favoriteで順番を変えません。
+
+mergeBackupは内容一致をMapで対応付け、入力配列に現れた順に新規・既存のIDを並べ、入力にない既存分の相対順を保持します。replaceは入力配列順を採用。本文と順序設定・listSortへのregistered保存は同一transactionでコミットし、エラー時は設定もロールバックします。元の日時を並べ替え目的で書き換えません。
+
+order-onlyは厳密検証済みJSONのIDと現存IDを対応付け、順序設定だけを書きます。定型文・カテゴリのput/clear/deleteはせず、タイトル・本文・お気に入り・日時が変わった文章も現在のまま維持します。一致0件は拒否、未登録分は無視して件数を通知。JSONの本文をID以外の推測照合に使いません。Clibor更新では対応IDの現在の順序を保ち、新規分を末尾に追加します。
+
+バックアップはreadAllの登録・取り込み順の配列で書き出すため、JSON形式のversion変更や文章ごとの追加フィールドは不要です。一覧の検索・カテゴリ・favoriteフィルタはこの相対順を保ちます。手動の並べ替え選択は保存し、同端末の他画面へは従来のchanged通知だけを送ります。外部への通信機能は追加しません。
