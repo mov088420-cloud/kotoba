@@ -1,16 +1,16 @@
 /* Bump VERSION on every release and update the entire file set together. */
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const PREFIX = `kotoba-shell-${encodeURIComponent(new URL(self.registration.scope).pathname)}-`;
 const CACHE = PREFIX + VERSION;
 // BEGIN GENERATED HASHES
 const HASHES = {
-  "./": "e60c82e80d1e096df03c7ab870c3a088a65c431e196f3947a664290230ea708d",
-  "./index.html": "e60c82e80d1e096df03c7ab870c3a088a65c431e196f3947a664290230ea708d",
-  "./styles.css": "6e18ab13d8af3880775651e014a4f6580b2ae2cc62ef31dc8a4ca776e247863e",
-  "./app.js": "b5291ca306c66c0707c1f3418a984bb9d3e7d98308a201e4dfc328f7e4616d73",
-  "./db.js": "3dc31382ac4634b121f845411fc822f1aef98a9945e990d14c00c164c92deb77",
-  "./data.js": "9d40f2016c8d59f24f89a08d810d4b857ce2fe2cfe7a2ac18b5453296eb6032e",
-  "./clibor.js": "6366a85e1d3e85283b9f81aa2fb95f797a7679e85a2267341132bf021ff1b385",
+  "./": "b1bd3d7fd3a03a8018d5a519989405d66af35695bdf53dc5755990bf8d21c685",
+  "./index.html": "b1bd3d7fd3a03a8018d5a519989405d66af35695bdf53dc5755990bf8d21c685",
+  "./styles.css": "548e59df00e3b571746c7fd26a667b0c9c3e16137068115bfab5a0a43bf46adf",
+  "./app.js": "4ffde5bbda0d74cea134d66253651fd811a2c306bd8ef1a3d493118aac850250",
+  "./db.js": "4fb865bf481323772127598cd7982c5208d4b6499c17fcdc8d7b7719fdb1b397",
+  "./data.js": "714356046f8cdb1960a9f3960f3fef2fc03643e39366ab68dfa8220bb96365dd",
+  "./clibor.js": "9f52e490833a8115129928eceae162a79a79ab4fa8054ad5e109ecff3b281225",
   "./manifest.webmanifest": "06fffe78207fedc45e7794df5572c2b0ac7f093dd0b784bfbdb73e7fad8250a6",
   "./icons/icon.svg": "0b514ec2bac9c91204d61b5de5a090d7b18fa8e9e9e6d7f11a112e459be8309a",
   "./icons/icon-192.png": "84b8b7a1d4330f7b6a04059b9f96b0224e1c98027a6fb226689ef2f6fe2818d9",
