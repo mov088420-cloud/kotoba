@@ -1,4 +1,5 @@
 import { uid, validName, validateBackup, mergeBackup } from './data.js';
+import { planCliborRefresh, snapshotSignature } from './clibor.js';
 
 export const DB_NAME = `kotoba-local:${new URL('./',import.meta.url).pathname}`;
 export const DB_VERSION = 1;
@@ -128,6 +129,22 @@ export function restoreBackup(raw,mode) {
       for (const c of next.categories) tx.objectStore('categories').put(c);
       for (const t of next.templates) tx.objectStore('templates').put(t);
       set({added:next.added,skipped:next.skipped});
+    },abort);
+  });
+}
+
+export function refreshClibor(raw,expected,hasGroups) {
+  const backup=validateBackup(raw);
+  return transaction(['categories','templates'],'readwrite',(tx,set,abort)=>{
+    getSnapshot(tx,current=>{
+      if(snapshotSignature(current)!==expected)throw new Error('確認中に定型文・カテゴリが変更されました。CSVを選び直して、更新内容を再確認してください。');
+      const plan=planCliborRefresh(current,backup,hasGroups);
+      // All deletes and writes are atomic; manual entries are never deleted or rewritten.
+      const store=tx.objectStore('templates');
+      for(const t of current.templates)if(t.clibor)store.delete(t.id);
+      for(const c of plan.next.categories)tx.objectStore('categories').put(c);
+      for(const t of plan.next.templates)if(t.clibor)store.put(t);
+      set({added:plan.added,updated:plan.updated,removed:plan.removed.length});
     },abort);
   });
 }
