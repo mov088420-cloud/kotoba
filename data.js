@@ -34,6 +34,11 @@ export function validateBackup(raw) {
     if (t.clibor !== undefined) {
       if (!object(t.clibor) || typeof t.clibor.note !== 'string' || typeof t.clibor.hotkey !== 'string') invalid('Cliborの元メモ情報が不正です。');
       result.clibor = {note:t.clibor.note,hotkey:t.clibor.hotkey};
+      if (t.clibor.source !== undefined) {
+        const source=t.clibor.source;
+        if (!object(source) || typeof source.title !== 'string' || !source.title.trim() || source.title.length>200 || typeof source.body !== 'string' || !source.body.trim()) invalid('Cliborの更新元情報が不正です。');
+        result.clibor.source={title:source.title,body:source.body};
+      }
     }
     return result;
   });
