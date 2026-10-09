@@ -30,3 +30,11 @@
 .preview-meta{font-size:11px;color:var(--muted);margin-bottom:4px}
 .preview-body{margin:0;padding:18px 20px 24px;font:inherit;font-size:15px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere;max-height:54dvh;overflow:auto;overscroll-behavior:contain;user-select:text;-webkit-user-select:text}
 @media(prefers-reduced-motion:no-preference){.preview-sheet[open]{animation:preview-appear .16s ease-out}@keyframes preview-appear{from{opacity:0;transform:translateY(6px) scale(.98)}to{opacity:1;transform:none}}}
+
+.refresh-review{margin:16px 0;font-size:14px;line-height:1.6}
+.refresh-review .notice{font-size:13px}
+.refresh-review summary{padding:10px 0;font-weight:600;cursor:pointer}
+#clibor-review-list{max-height:32vh;overflow:auto;padding:0 4px 0 22px;overflow-wrap:anywhere}
+#clibor-review-list li{padding:6px 0;border-bottom:1px solid var(--line)}
+#clibor-review-list small{display:block}
+.refresh-removed{color:var(--danger)}
