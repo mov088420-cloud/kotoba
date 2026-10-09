@@ -1,4 +1,4 @@
-import { uid, validName, validateBackup, mergeBackup } from './data.js';
+import { uid, validName, validateBackup, mergeBackup, orderTemplates } from './data.js';
 import { planCliborRefresh, snapshotSignature } from './clibor.js';
 
 export const DB_NAME = `kotoba-local:${new URL('./',import.meta.url).pathname}`;
@@ -50,12 +50,16 @@ function transaction(stores, mode, run) {
 function getSnapshot(tx, done, abort) {
   const categories = tx.objectStore('categories').getAll();
   const templates = tx.objectStore('templates').getAll();
+  const order=tx.objectStore('settings').get('templateOrder');
   let finished = 0;
-  const ready = () => { if (++finished === 2) { try { done({categories:categories.result, templates:templates.result}); } catch(error) { abort(error); } } };
-  categories.onsuccess = ready; templates.onsuccess = ready;
+  const ready = () => { if (++finished === 3) { try {
+    const stored=order.result?.value,legacy=[...templates.result].sort((a,b)=>b.updatedAt-a.updatedAt||a.id.localeCompare(b.id));
+    done({categories:categories.result,templates:orderTemplates(legacy,Array.isArray(stored)&&stored.every(id=>typeof id==='string')?stored:[])});
+  } catch(error) { abort(error); } } };
+  categories.onsuccess = ready; templates.onsuccess = ready;order.onsuccess=ready;
 }
 export function readAll() {
-  return transaction(['categories','templates'],'readonly',(tx,set,abort) => getSnapshot(tx,set,abort));
+  return transaction(['categories','templates','settings'],'readonly',(tx,set,abort) => getSnapshot(tx,set,abort));
 }
 export function getSetting(key) {
   return transaction(['settings'],'readonly',(tx,set) => { tx.objectStore('settings').get(key).onsuccess = e => set(e.target.result?.value); });
@@ -66,7 +70,7 @@ export function putSetting(key,value) {
 export function saveTemplate(input, expectedUpdatedAt = null) {
   const title = validName(input.title,200,'タイトル');
   if (typeof input.body !== 'string' || !input.body.trim()) return Promise.reject(new Error('本文を入力してください。'));
-  return transaction(['templates','categories'],'readwrite',(tx,set,abort) => {
+  return transaction(['templates','categories','settings'],'readwrite',(tx,set,abort) => {
     const store = tx.objectStore('templates');
     const id = input.id || uid();
     store.get(id).onsuccess = event => {
@@ -77,7 +81,10 @@ export function saveTemplate(input, expectedUpdatedAt = null) {
         const time = Math.max(Date.now(), (previous?.updatedAt || 0)+1);
         const entry = {id,title,body:input.body,categoryId:input.categoryId || null,favorite:!!input.favorite,createdAt:previous?.createdAt || time,updatedAt:time};
         if(previous?.clibor)entry.clibor={...previous.clibor};
-        store.put(entry); set(entry);
+        getSnapshot(tx,current=>{
+          const order=current.templates.map(t=>t.id);if(!previous)order.push(id);
+          store.put(entry);tx.objectStore('settings').put({key:'templateOrder',value:order});set(entry);
+        },abort);
         } catch(error) { abort(error); }
       };
       if (!input.categoryId) write();
@@ -120,14 +127,24 @@ export function deleteCategory(id) {
 }
 export function restoreBackup(raw,mode) {
   const backup = validateBackup(raw); // All validation completes before any write transaction starts.
-  if (!['merge','replace'].includes(mode)) return Promise.reject(new Error('復元方法が不正です。'));
-  return transaction(['categories','templates'],'readwrite',(tx,set,abort) => {
+  if (!['merge','replace','order-only'].includes(mode)) return Promise.reject(new Error('復元方法が不正です。'));
+  return transaction(['categories','templates','settings'],'readwrite',(tx,set,abort) => {
     getSnapshot(tx,current => {
+      if(mode==='order-only'){
+        const ids=new Set(current.templates.map(t=>t.id)),matched=backup.templates.filter(t=>ids.has(t.id));
+        if(!matched.length)throw new Error('同じIDの登録済み定型文がありません。以前取り込んだJSONを選んでください。保存内容は変更していません。');
+        const ordered=orderTemplates(current.templates,matched.map(t=>t.id));
+        tx.objectStore('settings').put({key:'templateOrder',value:ordered.map(t=>t.id)});
+        tx.objectStore('settings').put({key:'listSort',value:'registered'});
+        set({ordered:matched.length,ignored:backup.templates.length-matched.length});return;
+      }
       const next = mode === 'merge' ? mergeBackup(current,backup) : {...backup,added:backup.templates.length,skipped:0};
       // Clear and put belong to one transaction: quota failure aborts all changes, including clears.
       tx.objectStore('templates').clear(); tx.objectStore('categories').clear();
       for (const c of next.categories) tx.objectStore('categories').put(c);
       for (const t of next.templates) tx.objectStore('templates').put(t);
+      tx.objectStore('settings').put({key:'templateOrder',value:next.templates.map(t=>t.id)});
+      tx.objectStore('settings').put({key:'listSort',value:'registered'});
       set({added:next.added,skipped:next.skipped});
     },abort);
   });
@@ -135,7 +152,7 @@ export function restoreBackup(raw,mode) {
 
 export function refreshClibor(raw,expected,hasGroups) {
   const backup=validateBackup(raw);
-  return transaction(['categories','templates'],'readwrite',(tx,set,abort)=>{
+  return transaction(['categories','templates','settings'],'readwrite',(tx,set,abort)=>{
     getSnapshot(tx,current=>{
       if(snapshotSignature(current)!==expected)throw new Error('確認中に定型文・カテゴリが変更されました。CSVを選び直して、更新内容を再確認してください。');
       const plan=planCliborRefresh(current,backup,hasGroups);
@@ -144,6 +161,9 @@ export function refreshClibor(raw,expected,hasGroups) {
       for(const t of current.templates)if(t.clibor)store.delete(t.id);
       for(const c of plan.next.categories)tx.objectStore('categories').put(c);
       for(const t of plan.next.templates)if(t.clibor)store.put(t);
+      const ordered=orderTemplates(plan.next.templates,current.templates.map(t=>t.id));
+      tx.objectStore('settings').put({key:'templateOrder',value:ordered.map(t=>t.id)});
+      tx.objectStore('settings').put({key:'listSort',value:'registered'});
       set({added:plan.added,updated:plan.updated,removed:plan.removed.length});
     },abort);
   });
